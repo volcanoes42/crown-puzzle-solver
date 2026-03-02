@@ -4,11 +4,12 @@ import cv2
 from PIL import Image
 import pulp
 from collections import defaultdict
+from scipy.signal import find_peaks
 import os
 
 st.set_page_config(page_title="Crown Puzzle Solver", layout="wide")
 st.title("👑 Crown Puzzle (Star Battle) ソルバー")
-st.markdown("スマホゲームのパズル画像から領域と王冠の初期配置を自動読み取りし、解を求めます。")
+st.markdown("スマホゲームのパズル画像から **グリッドサイズ・領域・王冠の初期配置** を自動読み取りし、解を求めます。")
 
 # ─── ヘルパー関数 ───
 def rgb_to_hex(r, g, b):
@@ -17,6 +18,36 @@ def rgb_to_hex(r, g, b):
 def text_color_for_bg(r, g, b):
     lum = 0.299 * r + 0.587 * g + 0.114 * b
     return "#000000" if lum > 140 else "#ffffff"
+
+def detect_grid_size(img_gray, gx1, gy1, gx2, gy2):
+    """格子線のエッジをピーク検出し、行数・列数を自動判定する。
+
+    Returns:
+        n_rows, n_cols, h_lines, v_lines
+        (h_lines, v_lines は格子線の位置リスト)
+    """
+    grid_gray = img_gray[gy1:gy2, gx1:gx2]
+    h, w = grid_gray.shape
+
+    # Canny エッジ検出
+    edges = cv2.Canny(grid_gray, 50, 150)
+
+    # 水平線: 各行のエッジ平均 → ピーク = 格子の水平線
+    h_profile = edges.mean(axis=1)
+    h_peaks, _ = find_peaks(
+        h_profile, height=np.max(h_profile) * 0.3, distance=max(15, h // 20)
+    )
+
+    # 垂直線: 各列のエッジ平均 → ピーク = 格子の垂直線
+    v_profile = edges.mean(axis=0)
+    v_peaks, _ = find_peaks(
+        v_profile, height=np.max(v_profile) * 0.3, distance=max(15, w // 20)
+    )
+
+    n_rows = max(len(h_peaks) - 1, 1)
+    n_cols = max(len(v_peaks) - 1, 1)
+
+    return n_rows, n_cols, h_peaks.tolist(), v_peaks.tolist()
 
 def read_grid_colors(img_rgb, gx1, gy1, gx2, gy2, n):
     """各セルの色を枠近くからサンプリング（マーク回避）"""
@@ -39,9 +70,6 @@ def detect_marks(img_rgb, gx1, gy1, gx2, gy2, n):
       1. セル中央パッチの標準偏差 > 15 → マークあり
       2. マークありセルで金色ピクセル(R>200, G>150, B<120)比率 > 0.3 → 王冠
       3. それ以外のマーク → ×
-
-    Returns:
-        marks: dict (r,c) -> 'crown' | 'x' | 'empty'
     """
     grid_img = img_rgb[gy1:gy2, gx1:gx2]
     h, w = grid_img.shape[:2]
@@ -139,12 +167,8 @@ def solve_star_battle(n, stars_per, region_map, initial_crowns=None):
 
 
 # ═══════════════════════════════════════════
-# サイドバー
+# サイドバー: グリッド領域座標
 # ═══════════════════════════════════════════
-st.sidebar.header("⚙️ パラメータ設定")
-n = st.sidebar.number_input("グリッドサイズ (n×n)", 4, 15, 10)
-stars_per = st.sidebar.number_input("各行/列/領域の王冠の数", 1, 3, 2)
-
 st.sidebar.header("📐 グリッド領域座標")
 c1, c2 = st.sidebar.columns(2)
 gx1 = c1.number_input("左上 X", value=84)
@@ -176,6 +200,23 @@ if img_rgb is None:
     st.stop()
 
 st.image(img_rgb, caption="入力画像", width=380)
+
+# ═══════════════════════════════════════════
+# グリッドサイズ自動検出
+# ═══════════════════════════════════════════
+img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+n_rows, n_cols, h_lines, v_lines = detect_grid_size(img_gray, gx1, gy1, gx2, gy2)
+
+st.sidebar.header("⚙️ パラメータ設定")
+st.sidebar.markdown(f"🔍 **自動検出**: {n_rows}行 × {n_cols}列 "
+                     f"(水平線{len(h_lines)}本, 垂直線{len(v_lines)}本)")
+
+auto_n = n_rows if n_rows == n_cols else max(n_rows, n_cols)
+n = st.sidebar.number_input(
+    "グリッドサイズ (n×n)　※自動検出値を修正可",
+    min_value=4, max_value=15, value=auto_n
+)
+stars_per = st.sidebar.number_input("各行/列/領域の王冠の数", 1, 3, 2)
 
 # ═══════════════════════════════════════════
 # 画像処理: 色読み取り + マーク検出
