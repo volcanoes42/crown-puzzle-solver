@@ -8,7 +8,7 @@ import os
 
 st.set_page_config(page_title="Crown Puzzle Solver", layout="wide")
 st.title("👑 Crown Puzzle (Star Battle) ソルバー")
-st.markdown("スマホゲームのパズル画像から領域と王冠の初期配置を自動読み取りし、PuLP で解を求めます。")
+st.markdown("スマホゲームのパズル画像から領域と王冠の初期配置を自動読み取りし、解を求めます。")
 
 # ─── ヘルパー関数 ───
 def rgb_to_hex(r, g, b):
